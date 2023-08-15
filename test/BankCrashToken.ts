@@ -7,6 +7,8 @@ const MONTH_IN_SECONDS = 30 * 24 * 60 * 60;
 
 const YEAR_IN_SECONDS = 365 * 24 * 60 * 60;
 
+const STAKING_REWARD_HALVENING = 1688443200;
+
 describe("BankCrashToken", function () {
   async function deployBankCrashTokenFixture() {
     let owner: SignerWithAddress;
@@ -23,10 +25,6 @@ describe("BankCrashToken", function () {
     });
     await bankCrashToken.deployed();
 
-    let balanceOwner = await bankCrashToken.balanceOf(owner.address);
-    let balanceAddr1 = await bankCrashToken.balanceOf(address1.address);
-    let balanceAddr2 = await bankCrashToken.balanceOf(address2.address);
-
     return {bankCrashToken, owner, address1, address2}
   }
 
@@ -39,10 +37,6 @@ describe("BankCrashToken", function () {
     await bankCrashToken.connect(owner).approve(address1.address, 1000);
     await bankCrashToken.connect(owner).approve(address2.address, 1000);
     
-    let balanceOwner = await bankCrashToken.balanceOf(owner.address);
-    let balanceAddr1 = await bankCrashToken.balanceOf(address1.address);
-    let balanceAddr2 = await bankCrashToken.balanceOf(address2.address);
-
     return {bankCrashToken, owner, address1, address2}
   }
 
@@ -65,10 +59,6 @@ describe("BankCrashToken", function () {
     await bankCrashToken.connect(address2).approve(bankCrashToken.address, 1000);
     await bankCrashToken.connect(address2).stake(1000, 12);
 
-    let balanceOwner = await bankCrashToken.balanceOf(owner.address);
-    let balanceAddr1 = await bankCrashToken.balanceOf(address1.address);
-    let balanceAddr2 = await bankCrashToken.balanceOf(address2.address);
-
     return {bankCrashToken, owner, address1, address2}
   }
 
@@ -76,16 +66,12 @@ describe("BankCrashToken", function () {
     const { bankCrashToken, owner, address1, address2 } = await loadFixture(deployBankCrashTokenWithAddressesFixture);
 
     const now = await time.latest();
-    await time.increaseTo(now + 2 * YEAR_IN_SECONDS);
+    
+    // Start staking after 2 years from STAKING_REWARD_HALVENING
+    await time.increaseTo(STAKING_REWARD_HALVENING + 2 * YEAR_IN_SECONDS);
 
     await bankCrashToken.connect(address1).approve(bankCrashToken.address, 1000);
     await bankCrashToken.connect(address1).stake(1000, 24);
-    await bankCrashToken.connect(address2).approve(bankCrashToken.address, 1000);
-    await bankCrashToken.connect(address2).stake(1000, 12);
-
-    let balanceOwner = await bankCrashToken.balanceOf(owner.address);
-    let balanceAddr1 = await bankCrashToken.balanceOf(address1.address);
-    let balanceAddr2 = await bankCrashToken.balanceOf(address2.address);
 
     return {bankCrashToken, owner, address1, address2}
   }
@@ -186,7 +172,7 @@ describe("BankCrashToken", function () {
 
       const addr1Balance = (await bankCrashToken.balanceOf(address1.address)).toNumber();
 
-      const penaltyFactor = 0.1;
+      const penaltyFactor = 0.3;
       expect(addr1Balance).to.be.below(reward * penaltyFactor * 1.03);
       expect(addr1Balance).to.be.above(reward * penaltyFactor * 0.97);
     });
@@ -220,7 +206,7 @@ describe("BankCrashToken", function () {
 
       const addr1Balance = (await bankCrashToken.balanceOf(address1.address)).toNumber();
 
-      const penaltyFactor = 0.1 + 0.9 * completedStakingDuration / totalStakingDuration;
+      const penaltyFactor = 0.3 + 0.7 * completedStakingDuration / totalStakingDuration;
       expect(addr1Balance).to.be.below(reward * penaltyFactor * 1.03);
       expect(addr1Balance).to.be.above(reward * penaltyFactor * 0.97);
     });
@@ -231,7 +217,6 @@ describe("BankCrashToken", function () {
 
       const totalStakingDuration = stake.endAt.toNumber() - stake.createdAt.toNumber();
 
-      // 6 months passes
       await time.increaseTo(stake.endAt);
 
       await bankCrashToken.connect(address1).unstake(0);
@@ -245,6 +230,37 @@ describe("BankCrashToken", function () {
       const n = 365 * 24 * 60 * 60;
       const t = totalStakingDuration / (365 * 24 * 60 * 60);
       const reward = P * (1 + r / n) ** (n * t);
+
+      const addr1Balance = (await bankCrashToken.balanceOf(address1.address)).toNumber();
+
+      expect(addr1Balance).to.be.below(reward * 1.03);
+      expect(addr1Balance).to.be.above(reward * 0.97);
+    });
+
+    it("Should halve APY after 2 years with BANK CRASH", async function () {
+
+      const { bankCrashToken, owner, address1 } = await loadFixture(deployBankCrashTokenWithStakesAfter2YearsFixture);
+      for (let index = 0; index < 10; index++) {
+        await bankCrashToken.connect(owner).updateBankCrashEvents(true, true, true);
+      }
+      
+      const stake = await bankCrashToken.stakes(address1.address, 0);
+
+      const totalStakingDuration = stake.endAt.toNumber() - stake.createdAt.toNumber();
+
+      await time.increaseTo(stake.endAt);
+      
+      await bankCrashToken.connect(address1).unstake(0);
+      
+      // P (principal)
+      // r (annual interest rate)
+      // n (compounding frequency)
+      // t (time in years)
+      const P = stake.amount.toNumber();
+      const r = stake.maximumAPY.toNumber() ;
+      const n = 365 * 24 * 60 * 60;
+      const t = totalStakingDuration / (365 * 24 * 60 * 60);
+      const reward = P * (1 + (r/100) / n) ** (n * t);
 
       const addr1Balance = (await bankCrashToken.balanceOf(address1.address)).toNumber();
 
@@ -319,7 +335,7 @@ describe("BankCrashToken", function () {
       const stake = await bankCrashToken.stakes(address1.address, 0);
 
       await bankCrashToken.connect(owner).updateBankCrashEvents(true, true, true);
-      expect((await address1Token.getBonusAPY(stake)).toNumber()).to.equal(42 + 14 + 2);
+      expect((await address1Token.getBonusAPY(stake)).toNumber()).to.equal(21 + 9 + 2);
     });
 
   });
