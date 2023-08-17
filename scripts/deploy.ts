@@ -8,6 +8,7 @@ async function main() {
     "BankCrashTokenV1"
   );
   console.log("Deploying BankCrashTokenV1...");
+
   const contract = await upgrades.deployProxy(BankCrashTokenV1, [], {
     initializer: "initialize",
     kind: "transparent",
