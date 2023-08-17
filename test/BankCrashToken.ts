@@ -18,7 +18,7 @@ describe("BankCrashToken", function () {
     [owner, address1, address2] = await ethers.getSigners();
     
     // Deploy our contract
-    const BankCrashTokenV1 = await ethers.getContractFactory("BankCrashToken");
+    const BankCrashTokenV1 = await ethers.getContractFactory("BankCrashTokenV1");
     const bankCrashToken = await upgrades.deployProxy(BankCrashTokenV1, [], {
       initializer: "initialize",
       kind: "transparent",
@@ -323,9 +323,8 @@ describe("BankCrashToken", function () {
       const { bankCrashToken, address1} = await loadFixture(deployBankCrashTokenWithStakesFixture);
 
       const address1Token = bankCrashToken.connect(address1.address);
-      const stake = await bankCrashToken.stakes(address1.address, 0);
 
-      expect(await address1Token.getBonusAPY(stake)).to.equal(0);
+      expect(await address1Token.getBonusAPY(0)).to.equal(0);
     });
 
     it("Should calculate bonusAPY correctly v2", async function () {
@@ -335,7 +334,7 @@ describe("BankCrashToken", function () {
       const stake = await bankCrashToken.stakes(address1.address, 0);
 
       await bankCrashToken.connect(owner).updateBankCrashEvents(true, true, true);
-      expect((await address1Token.getBonusAPY(stake)).toNumber()).to.equal(21 + 9 + 2);
+      expect((await address1Token.getBonusAPY(0)).toNumber()).to.equal(21 + 9 + 2);
     });
 
   });

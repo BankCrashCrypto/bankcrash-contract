@@ -11,13 +11,13 @@ import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "./Interest.sol";
 
 /**
- * @title BankCrashTokenV1
+ * @title BankCrashTokenV3Test
  * @dev This is an ERC20 token contract with staking and reward features. It implements an upgradeable pattern via OpenZeppelin SDK.
  * It also contains methods to track bank crashes and calculate APY based on the crash events.
  */
 import "hardhat/console.sol";
 
-contract BankCrashTokenV3 is Initializable, ERC20Upgradeable, OwnableUpgradeable, Interest {
+contract BankCrashTokenV3Test is Initializable, ERC20Upgradeable, OwnableUpgradeable, Interest {
     using SafeMath for uint256;
     
     /**

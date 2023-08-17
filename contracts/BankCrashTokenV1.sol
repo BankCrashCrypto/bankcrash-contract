@@ -13,10 +13,10 @@ import "./Interest.sol";
  * @title BankCrashTokenV1
  * @dev This is an ERC20 token contract with staking and reward features. It implements an upgradeable pattern via OpenZeppelin SDK.
  * It also contains methods to track bank crashes and calculate APY based on the crash events.
+ * Website is at: https://bankcrash.gg
+ * White paper is at: https://docs.bankcrash.gg
  */
-import "hardhat/console.sol";
-
-contract BankCrashToken is Initializable, ERC20Upgradeable, OwnableUpgradeable, Interest {
+contract BankCrashTokenV1 is Initializable, ERC20Upgradeable, OwnableUpgradeable, Interest {
     using SafeMath for uint256;
     
     /**
@@ -35,7 +35,7 @@ contract BankCrashToken is Initializable, ERC20Upgradeable, OwnableUpgradeable, 
         __Ownable_init();
         _mint(msg.sender, INITIAL_SUPPLY);
         totalStakes = 0;
-        totalStakers = 0;
+        activeStakers = 0;
     }
 
     // 42.000.000.000 initial token supply
@@ -87,8 +87,8 @@ contract BankCrashToken is Initializable, ERC20Upgradeable, OwnableUpgradeable, 
     // Total locked amount of stakes
     uint256 public totalStakes;
 
-    // Total number of current stakers
-    uint256 public totalStakers;
+    // Total number of active stakers
+    uint256 public activeStakers;
 
     // Mapping from user to number of active stakes.
     mapping(address => uint) public activeStakes;
@@ -97,32 +97,40 @@ contract BankCrashToken is Initializable, ERC20Upgradeable, OwnableUpgradeable, 
     uint256 public constant stakingRewardHalveningStart = 1688443200;
 
     /**
-    * @notice Enables users to stake tokens
-    * @param _amount The amount of tokens to stake
-    * @param _months The length of the stake in months
-    * @dev Transfers tokens from the user to the contract and creates a new Stake
+    * @notice Allows users to lock in their tokens for staking.
+    * @param _amount Amount of tokens the user wants to stake.
+    * @param _months Duration for which the user wants to stake their tokens.
+    * 
+    * @dev 
+    * - Validates the staking period and amount.
+    * - Burns the staking amount from the user's balance, effectively locking it.
+    * - Sets the base APY and calculates the max APY based on the staking duration.
+    * - Records the staking details in the stakes mapping.
+    * - Updates stakers count and total staked amount.
+    * - Emits a `StakeCreated` event indicating the successful creation of the stake.
+    * 
+    * Requirements:
+    * - Staking duration must be between 3 and 120 months.
+    * - Staking amount must be greater than zero.
     */
     function stake(uint256 _amount, uint256 _months) external {
         require(_months >= 3, "Staking period must be at least 3 months");
         require(_months <= 120, "Staking period can only be maximum 120 months (10 years)");
         require(_amount > 0, "Staking amount must be greater than zero");
 
-        // Burn locked amount of tokens
         _burn(msg.sender, _amount);
 
         uint256 baseAPY = 4;
 
-        // Maximum_apy = 69 + month * 2
         uint256 maxAPY = 69 + _months * 2;
 
         uint256 start = block.timestamp;
         uint256 end = block.timestamp.add(_months.mul(30 days));
 
-        // Create a new stake
         stakes[msg.sender][nextStakeId[msg.sender]] = Stake(_amount, start, end, 0, baseAPY, maxAPY, BankCrashEvents(bankCrashEvents.bigCrash, bankCrashEvents.mediumCrash, bankCrashEvents.smallCrash));
 
         if (activeStakes[msg.sender] == 0) {
-            totalStakers++;
+            activeStakers++;
         }
 
         activeStakes[msg.sender]++;
@@ -131,51 +139,61 @@ contract BankCrashToken is Initializable, ERC20Upgradeable, OwnableUpgradeable, 
 
         emit StakeCreated(msg.sender, nextStakeId[msg.sender], _amount, end, baseAPY, maxAPY);
         
-        // Increment the next stake ID for this user
         nextStakeId[msg.sender]++;
     }
 
     /**
-    * @notice Allows users to remove a stake
-    * @param _stakeId The ID of the stake to remove
-    * @dev Checks that the stake exists, calculates the reward, applies a penalty for early unstaking, mints and transfers reward
+    * @notice Allows users to remove a stake and claim rewards.
+    * @param _stakeId The unique ID of the stake to be removed.
+    * 
+    * @dev 
+    * - Validates that the stake exists and is active.
+    * - Calculates the bonus and final APY.
+    * - Computes the reward with consideration to any penalties for early unstaking.
+    * - Mints the reward, updates the state, and transfers the amount to the user.
+    * - Emits a `StakeRemoved` event.
+    * 
+    * Requirements:
+    * - The stake with the given ID must exist.
+    * - The stake must not have been previously unstaked.
     */
     function unstake(uint256 _stakeId) external {
         require(stakes[msg.sender][_stakeId].createdAt > 0, "This stake does not exist");
         require(stakes[msg.sender][_stakeId].closedAt == 0, "This stake has already been unstaked");
         Stake storage userStake = stakes[msg.sender][_stakeId];
-        uint256 bonusApy = getBonusAPY(userStake);
         
+        uint256 bonusApy = getBonusAPY(_stakeId);
         uint256 finalApy = userStake.baseAPY.add(bonusApy);
+
         uint256 reward = calculateReward(finalApy, userStake);
-        uint256 rewardWithPenalty = reward.mul(getStakePenalty(_stakeId)).div(100);
+        uint256 userStakeWithReward = userStake.amount.add(reward);
+        uint256 finalStakeReward = userStakeWithReward.mul(getStakePenalty(_stakeId)).div(100);
 
         _mint(
             address(this),
-            rewardWithPenalty
+            finalStakeReward
         );
-
-        this.transfer(msg.sender, rewardWithPenalty);
+        this.transfer(msg.sender, finalStakeReward);
 
         stakes[msg.sender][_stakeId].closedAt = block.timestamp;
-
         activeStakes[msg.sender]--;
-
         totalStakes -= userStake.amount;
-
-        // If this was the user's last stake, decrement totalStakers.
         if (activeStakes[msg.sender] == 0) {
-            totalStakers--;
+            activeStakers--;
         }
 
-        emit StakeRemoved(msg.sender, _stakeId, userStake.amount, rewardWithPenalty);
+        emit StakeRemoved(msg.sender, _stakeId, userStake.amount, finalStakeReward);
     }
 
     /**
     * @notice Calculates the penalty for early unstaking
     * @param _stakeId The ID of the stake to get penalty
     * @return The penalty as a percentage of the reward
-    * @dev Penalizes early unstaking. No penalty if stake is completed. 67% penalty if unstaked within first 60 days. Linear penalty based on completed stake afterwards.
+    * @dev 
+    * - Penalizes early unstaking.
+    * - No penalty if stake is completed or in the first hour of the stake.
+    * - 70% penalty if unstaked within first 60 days.
+    * - Linearly decreasing penalty based on completed stake afterwards.
     */
     function getStakePenalty(uint256 _stakeId) public view returns (uint256) {
         require(stakes[msg.sender][_stakeId].createdAt > 0, "This stake does not exist");
@@ -183,15 +201,37 @@ contract BankCrashToken is Initializable, ERC20Upgradeable, OwnableUpgradeable, 
 
         uint256 totalStakingDuration = userStake.endAt.sub(userStake.createdAt);
         uint256 completedStake = block.timestamp.sub(userStake.createdAt);
-        
+
+        if(block.timestamp < userStake.createdAt + 1 hours) {
+            return 100;
+        }
+
         if(block.timestamp > userStake.endAt) {
             return 100;
         }
+
         if(block.timestamp < userStake.createdAt + 60 days) {
             return 30;
         } else {
             return 30 + 70 * completedStake / totalStakingDuration;
         }
+    }
+
+    /**
+    * @notice Calculates the bonus APY based on 'Bank Crash' events
+    * @param _stakeId The ID of the stake for which the bonus APY is calculated
+    * @return The bonus APY amount
+    * @dev Checks the number of each type of 'Bank Crash' events that have occurred since the user's stake was created, and calculates the bonus APY
+    */
+    function getBonusAPY(uint _stakeId) public view returns (uint256) {
+        require(stakes[msg.sender][_stakeId].createdAt > 0, "This stake does not exist");
+        Stake storage userStake = stakes[msg.sender][_stakeId];
+
+        uint256 bigBankCollapses = bankCrashEvents.bigCrash - userStake.memento.bigCrash;
+        uint256 mediumBankCollapses = bankCrashEvents.mediumCrash - userStake.memento.mediumCrash;
+        uint256 smallBankCollapses = bankCrashEvents.smallCrash - userStake.memento.smallCrash;
+
+        return bigBankCollapses * 21 + mediumBankCollapses * 9 + smallBankCollapses * 2;
     }
 
     /**
@@ -215,20 +255,6 @@ contract BankCrashToken is Initializable, ERC20Upgradeable, OwnableUpgradeable, 
         }
 
         emit BankCrashEventAdded(msg.sender, bigBankCrashEvent, mediumBankCrashEvent, smallBankCrashEvent);
-    }
-
-    /**
-    * @notice Calculates the bonus APY based on 'Bank Crash' events
-    * @param userStake The stake for which the bonus APY is calculated
-    * @return The bonus APY amount
-    * @dev Checks the number of each type of 'Bank Crash' events that have occurred since the user's stake was created, and calculates the bonus APY
-    */
-    function getBonusAPY(Stake memory userStake) public view returns (uint256) {
-        uint256 bigBankCollapses = bankCrashEvents.bigCrash - userStake.memento.bigCrash;
-        uint256 mediumBankCollapses = bankCrashEvents.mediumCrash - userStake.memento.mediumCrash;
-        uint256 smallBankCollapses = bankCrashEvents.smallCrash - userStake.memento.smallCrash;
-
-        return bigBankCollapses * 21 + mediumBankCollapses * 9 + smallBankCollapses * 2;
     }
 
     /**
@@ -281,7 +307,7 @@ contract BankCrashToken is Initializable, ERC20Upgradeable, OwnableUpgradeable, 
             periods++;
         }
         
-        return totalReward;
+        return totalReward - userStake.amount;
     }
 
     /**
