@@ -257,7 +257,7 @@ describe("BankCrashToken", function () {
       // n (compounding frequency)
       // t (time in years)
       const P = stake.amount.toNumber();
-      const r = stake.maximumAPY.toNumber() ;
+      const r = stake.maximumAPY.toNumber();
       const n = 365 * 24 * 60 * 60;
       const t = totalStakingDuration / (365 * 24 * 60 * 60);
       const reward = P * (1 + (r/100) / n) ** (n * t);
